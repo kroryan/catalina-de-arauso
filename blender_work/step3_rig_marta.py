@@ -156,33 +156,54 @@ for side in ('Left', 'Right'):
         fingers_fixed += 1
 print('FINGERS_REBUILT', fingers_fixed, flush=True)
 
-# Trunk hose rebuilt along the thighs. The source rig weights the wide hose
-# mostly to the pelvis (Hips ~0.6), so it stayed behind and stretched into a
-# curtain between the legs when a leg rose or opened. Between the hip joint and
-# the knee every vertex now follows its own thigh (a narrow left/right blend at
-# the crotch), blending with the pelvis only in the 16 cm below the hip joint,
-# and fading back into the source weights just above the knee. The tassets
-# hang above the hip joint and are not touched.
+# Trunk hose along the thighs. The source rig weights the wide hose mostly to
+# the pelvis, so it stayed behind and stretched like a curtain when a leg rose.
+# Below the hip joint the thigh share is raised (never lowered) to a floor that
+# grows from 40% at the hip joint to 100% 16 cm lower, split left/right with a
+# narrow blend at the crotch, and fades back into the source weights just
+# above the knee.
 def _sm(x): x = min(1., max(0., x)); return x * x * (3 - 2 * x)
 hip_z = (J['LeftUpLeg']['head'].z + J['RightUpLeg']['head'].z) / 2
 knee_z = (J['LeftLeg']['head'].z + J['RightLeg']['head'].z) / 2
 HIP_BLEND, CROTCH_HALF, KNEE_FADE = .16, .04, .06
+LEGS = ('LeftUpLeg', 'RightUpLeg')
 legs_fixed = 0
 for i, v in enumerate(mesh.data.vertices):
     z = v.co.z
     if z >= hip_z or z < knee_z: continue
     w = per_vertex[i]
     if sum(x for n, x in w.items() if n in ('Hips', 'Spine', 'LeftUpLeg', 'RightUpLeg', 'LeftLeg', 'RightLeg')) < .5: continue
+    floor = (.4 + .6 * _sm((hip_z - z) / HIP_BLEND)) * _sm((z - knee_z) / KNEE_FADE)
+    cur = sum(w.get(n, 0) for n in LEGS)
+    if cur >= floor: continue
     sl = _sm((v.co.x + CROTCH_HALF) / (2 * CROTCH_HALF))          # 1 = left thigh
-    t_hip = _sm((hip_z - z) / HIP_BLEND)
-    new = {'Hips': 1 - t_hip, 'LeftUpLeg': t_hip * sl, 'RightUpLeg': t_hip * (1 - sl)}
-    k = _sm((z - knee_z) / KNEE_FADE)                               # 0 at the knee: source weights
-    mix = {n: x * (1 - k) for n, x in w.items()}
-    for n, x in new.items(): mix[n] = mix.get(n, 0) + x * k
-    tot = sum(mix.values()); per_vertex[i] = {n: x / tot for n, x in mix.items() if x / tot > 1e-4}
+    rest = (1 - floor) / max(1e-6, 1 - cur)
+    nw = {n: x * rest for n, x in w.items() if n not in LEGS}
+    nw['LeftUpLeg'] = floor * sl; nw['RightUpLeg'] = floor * (1 - sl)
+    per_vertex[i] = {n: x for n, x in nw.items() if x > 1e-4}
     legs_fixed += 1
 print('TRUNK_HOSE_REBUILT', legs_fixed, 'hip_z', round(hip_z, 3), 'knee_z', round(knee_z, 3), flush=True)
 
+# Waist and tassets, matched to Felipe II's waist (the most natural one in
+# game). The source rig puts the whole waist on the pelvis and the cuirass is
+# rigid from just above the spine joint, so the spine's bend happened in a few
+# centimetres and the tassets swung apart from the breastplate. The tassets now
+# ride the pelvis as on Felipe, the lower spine takes over from 8 cm above the
+# hip joint (55% at the belt), and the belt band below the rigid cuirass is
+# 10 cm wide, so the waist bends smoothly over Hips -> Spine -> Spine1.
+WAIST_LO, WAIST_HI, WAIST_SPINE = hip_z + .08, 1.10, .55
+waist_fixed = 0
+for i, v in enumerate(mesh.data.vertices):
+    z = v.co.z
+    if z <= WAIST_LO or z >= WAIST_HI + .10: continue
+    w = per_vertex[i]
+    hs = w.get('Hips', 0) + w.get('Spine', 0)
+    if hs < .5: continue
+    s = WAIST_SPINE * _sm((z - WAIST_LO) / (WAIST_HI - WAIST_LO))
+    if w.get('Spine', 0) >= s * hs: continue
+    w['Spine'] = s * hs; w['Hips'] = hs - w['Spine']
+    waist_fixed += 1
+print('WAIST_SPINE', waist_fixed, flush=True)
 # Arms rebuilt along Marta's bones. The source rig gives the top of the upper
 # arm (pauldron, upper cannon) to the clavicle and chest, so with the arms down
 # those parts would stay in T-pose and stretch into flaps. Inside the
@@ -230,7 +251,7 @@ print('ARMS_REBUILT', arm_fixed, flush=True)
 # belt (a 6 cm band). On the front and back of the chest the clavicle and
 # upper-arm weights are also handed to the chest, fading out towards the
 # pauldrons, so raising an arm does not dent the breastplate.
-BELT_Z, BELT_BAND = 1.12, .03  # Catalina's waist plate
+BELT_Z, BELT_BAND = 1.15, .05  # Catalina's waist plate; wide band as on Felipe II
 CORE_X, SIDE_X = .12, .17
 neck_z = J['Neck']['head'].z
 for i, v in enumerate(mesh.data.vertices):
