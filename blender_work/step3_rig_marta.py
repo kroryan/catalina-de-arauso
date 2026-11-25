@@ -156,6 +156,33 @@ for side in ('Left', 'Right'):
         fingers_fixed += 1
 print('FINGERS_REBUILT', fingers_fixed, flush=True)
 
+# Trunk hose rebuilt along the thighs. The source rig weights the wide hose
+# mostly to the pelvis (Hips ~0.6), so it stayed behind and stretched into a
+# curtain between the legs when a leg rose or opened. Between the hip joint and
+# the knee every vertex now follows its own thigh (a narrow left/right blend at
+# the crotch), blending with the pelvis only in the 16 cm below the hip joint,
+# and fading back into the source weights just above the knee. The tassets
+# hang above the hip joint and are not touched.
+def _sm(x): x = min(1., max(0., x)); return x * x * (3 - 2 * x)
+hip_z = (J['LeftUpLeg']['head'].z + J['RightUpLeg']['head'].z) / 2
+knee_z = (J['LeftLeg']['head'].z + J['RightLeg']['head'].z) / 2
+HIP_BLEND, CROTCH_HALF, KNEE_FADE = .16, .04, .06
+legs_fixed = 0
+for i, v in enumerate(mesh.data.vertices):
+    z = v.co.z
+    if z >= hip_z or z < knee_z: continue
+    w = per_vertex[i]
+    if sum(x for n, x in w.items() if n in ('Hips', 'Spine', 'LeftUpLeg', 'RightUpLeg', 'LeftLeg', 'RightLeg')) < .5: continue
+    sl = _sm((v.co.x + CROTCH_HALF) / (2 * CROTCH_HALF))          # 1 = left thigh
+    t_hip = _sm((hip_z - z) / HIP_BLEND)
+    new = {'Hips': 1 - t_hip, 'LeftUpLeg': t_hip * sl, 'RightUpLeg': t_hip * (1 - sl)}
+    k = _sm((z - knee_z) / KNEE_FADE)                               # 0 at the knee: source weights
+    mix = {n: x * (1 - k) for n, x in w.items()}
+    for n, x in new.items(): mix[n] = mix.get(n, 0) + x * k
+    tot = sum(mix.values()); per_vertex[i] = {n: x / tot for n, x in mix.items() if x / tot > 1e-4}
+    legs_fixed += 1
+print('TRUNK_HOSE_REBUILT', legs_fixed, 'hip_z', round(hip_z, 3), 'knee_z', round(knee_z, 3), flush=True)
+
 # Arms rebuilt along Marta's bones. The source rig gives the top of the upper
 # arm (pauldron, upper cannon) to the clavicle and chest, so with the arms down
 # those parts would stay in T-pose and stretch into flaps. Inside the
